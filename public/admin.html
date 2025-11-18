@@ -78,7 +78,7 @@
     </div>
   </div>
 
-  <script>
+    <script>
     const form = document.getElementById("uploadForm");
     const resultBox = document.getElementById("result");
     const htmlContainer = document.getElementById("htmlContainer");
@@ -140,21 +140,27 @@
       }
     });
 
-    copyBtn.addEventListener("click", async () => {
+    copyBtn.addEventListener("click", () => {
       const text = htmlOutput.value || "";
       if (!text) return;
 
+      // Select the textarea content
+      htmlOutput.focus();
+      htmlOutput.select();
+
       try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
+        const successful = document.execCommand("copy");
+        if (successful) {
+          copyMsg.textContent = "HTML copied to clipboard.";
+          copyMsg.classList.remove("hidden");
         } else {
-          // Fallback for older browsers
-          htmlOutput.select();
-          document.execCommand("copy");
+          copyMsg.textContent = "Copy command not supported in this browser.";
+          copyMsg.classList.remove("hidden");
         }
-        copyMsg.classList.remove("hidden");
       } catch (err) {
         console.error("Copy failed:", err);
+        copyMsg.textContent = "Copy failed. You can still select and copy manually.";
+        copyMsg.classList.remove("hidden");
       }
     });
   </script>
