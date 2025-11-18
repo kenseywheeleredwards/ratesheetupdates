@@ -8,18 +8,18 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve static files from /public (this gives us admin.html)
+// Serve static files from /public (admin.html + generated HTML)
 app.use(express.static(path.join(__dirname, "public")));
 
 // Configure multer to store uploads in memory
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Health check
+// Health check (optional)
 app.get("/health", (req, res) => {
   res.send("OK");
 });
 
-// Helper: escape HTML special characters
+// Escape HTML
 function escapeHtml(str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
@@ -29,42 +29,99 @@ function escapeHtml(str) {
 }
 
 /**
- * Build ALL tables + Eligible Products/Models sections from CSV.
- *
- * CSV header must be:
- * Table Group, Eligible Products/Models, Tiers, 36M, 48M, 60M, 72M, 84M, Down Payment, Front-End Cap, Dealer Fee
+ * Helper: find a column index in the header row using
+ * case-insensitive "contains" matching on a set of keywords.
  */
-// Build tables from OEM-style promo CSV (like "BRP Promotions - November 2025")
+function findColumn(headers, keywords) {
+  const lowerHeaders = headers.map((h) => (h || "").toString().toLowerCase());
+
+  for (let i = 0; i < lowerHeaders.length; i++) {
+    const h = lowerHeaders[i];
+    let ok = true;
+    for (const kw of keywords) {
+      if (!h.includes(kw.toLowerCase())) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+/**
+ * Build tables from an OEM-style promo CSV (like "BRP Promotions - November 2025").
+ * We automatically detect:
+ *  - Product column
+ *  - Eligible models / model years column
+ *  - Repayment term column
+ *  - Promo Rate RT 1 / 1.12 / 2 / 2.1 / 2.2 columns
+ *  - Dealer Fee RT 1 / 1.12 / 2 / 2.1 / 2.2 columns
+ */
 function buildTablesHtmlFromCsv(records) {
   if (!records || records.length < 2) {
     return '<p class="text-red-600">No data found in CSV.</p>';
   }
 
-  // Normalize header row (trim & string)
+  // Normalize header row
   const headerRow = records[0].map((h) => (h || "").toString().trim());
   const dataRows = records.slice(1);
 
-  // Column indexes we care about
-  const idxProduct = headerRow.indexOf("Product");
-  const idxYears = headerRow.indexOf("Eligible Model Years");
-  const idxTerm = headerRow.indexOf("Repayment Term");
+  // Try to detect key columns by keywords
+  const idxProduct = findColumn(headerRow, ["product"]);
+  const idxYears = findColumn(headerRow, ["eligible", "model"]); // "Eligible models", "Eligible Model Years", etc.
+  const idxTerm = findColumn(headerRow, ["term"]); // "Repayment Term", "Term", etc.
 
-  const idxRate1 = headerRow.indexOf("Promo Rate RT 1");
-  const idxRate112 = headerRow.indexOf("Promo Rate RT 1.12");
-  const idxRate2 = headerRow.indexOf("Promo Rate RT 2");
-  const idxRate21 = headerRow.indexOf("Promo Rate RT 2.1");
-  const idxRate22 = headerRow.indexOf("Promo Rate RT 2.2");
+  // Find promo rate columns by looking for "promo" + "rate" + "rt"
+  const rateCols = []; // { idx, tierName }
+  headerRow.forEach((h, i) => {
+    const lower = h.toLowerCase();
+    if (lower.includes("promo") && lower.includes("rate") && lower.includes("rt")) {
+      // Try to extract RT number, e.g. "Promo Rate RT 1.12"
+      const m = lower.match(/rt\s*([0-9.]+)/);
+      let tierName = null;
+      if (m && m[1]) {
+        const rt = m[1];
+        if (rt === "1") tierName = "Tier 1";
+        else if (rt === "1.12" || rt === "1,12") tierName = "Tier 1.12";
+        else if (rt === "2") tierName = "Tier 2";
+        else if (rt === "2.1" || rt === "2,1") tierName = "Tier 2.1";
+        else if (rt === "2.2" || rt === "2,2") tierName = "Tier 2.2";
+        else tierName = `Tier ${rt}`;
+      }
+      if (tierName) {
+        rateCols.push({ idx: i, tierName });
+      }
+    }
+  });
 
-  const idxFee1 = headerRow.indexOf("Dealer Fee RT 1");
-  const idxFee112 = headerRow.indexOf("Dealer Fee RT 1.12");
-  const idxFee2 = headerRow.indexOf("Dealer Fee RT 2");
-  const idxFee21 = headerRow.indexOf("Dealer Fee RT 2.1");
-  const idxFee22 = headerRow.indexOf("Dealer Fee RT 2.2");
+  // Find dealer fee columns similarly
+  const feeCols = []; // { idx, tierName }
+  headerRow.forEach((h, i) => {
+    const lower = h.toLowerCase();
+    if (lower.includes("dealer") && lower.includes("fee") && lower.includes("rt")) {
+      const m = lower.match(/rt\s*([0-9.]+)/);
+      let tierName = null;
+      if (m && m[1]) {
+        const rt = m[1];
+        if (rt === "1") tierName = "Tier 1";
+        else if (rt === "1.12" || rt === "1,12") tierName = "Tier 1.12";
+        else if (rt === "2") tierName = "Tier 2";
+        else if (rt === "2.1" || rt === "2,1") tierName = "Tier 2.1";
+        else if (rt === "2.2" || rt === "2,2") tierName = "Tier 2.2";
+        else tierName = `Tier ${rt}`;
+      }
+      if (tierName) {
+        feeCols.push({ idx: i, tierName });
+      }
+    }
+  });
 
-  // Basic sanity check
-  if (idxProduct === -1 || idxYears === -1 || idxTerm === -1 || idxRate1 === -1 || idxRate2 === -1) {
+  // Basic sanity check – if we can't find these, the format isn't what we expect
+  if (idxProduct === -1 || idxYears === -1 || idxTerm === -1 || rateCols.length === 0) {
+    const headerPreview = headerRow.join(" | ");
     throw new Error(
-      'CSV format not recognized. Expected columns like "Product", "Eligible Model Years", "Repayment Term", "Promo Rate RT 1", "Promo Rate RT 2".'
+      "CSV format not recognized automatically. Header row is: " + headerPreview
     );
   }
 
@@ -75,22 +132,26 @@ function buildTablesHtmlFromCsv(records) {
     if (!isNaN(num)) {
       return `${String(num).replace(/\.0+$/, "")}M`;
     }
-    return str;
+    return str || "";
   }
 
   // Group rows by Product + Years
   const groups = new Map();
 
   dataRows.forEach((row) => {
+    if (!row || row.every((cell) => !cell || String(cell).trim() === "")) {
+      return; // skip completely empty rows
+    }
+
     const product = (row[idxProduct] || "").toString().trim();
     const years = (row[idxYears] || "").toString().trim();
     const termRaw = row[idxTerm];
 
-    if (!product && !years && (termRaw === null || termRaw === undefined || String(termRaw).trim() === "")) {
-      return; // skip empty rows
-    }
+    if (!product && !years && !termRaw) return;
 
     const termLabel = termLabelFrom(termRaw);
+    if (!termLabel) return;
+
     const key = `${product}|||${years}`;
 
     if (!groups.has(key)) {
@@ -106,29 +167,24 @@ function buildTablesHtmlFromCsv(records) {
     const group = groups.get(key);
     group.terms.add(termLabel);
 
-    function setTier(tierName, rateIdx, feeIdx) {
-      if (rateIdx === -1) return;
-      const rate = (row[rateIdx] || "").toString().trim();
-      if (!rate) return;
+    function setTierFromCols(colArray, isFee) {
+      colArray.forEach(({ idx, tierName }) => {
+        const value = (row[idx] || "").toString().trim();
+        if (!value) return;
 
-      if (!group.tierRates[tierName]) {
-        group.tierRates[tierName] = {};
-      }
-      group.tierRates[tierName][termLabel] = rate;
-
-      if (feeIdx !== -1) {
-        const fee = (row[feeIdx] || "").toString().trim();
-        if (fee) {
-          group.tierFees[tierName] = fee;
+        if (isFee) {
+          group.tierFees[tierName] = value;
+        } else {
+          if (!group.tierRates[tierName]) {
+            group.tierRates[tierName] = {};
+          }
+          group.tierRates[tierName][termLabel] = value;
         }
-      }
+      });
     }
 
-    setTier("Tier 1", idxRate1, idxFee1);
-    setTier("Tier 1.12", idxRate112, idxFee112);
-    setTier("Tier 2", idxRate2, idxFee2);
-    setTier("Tier 2.1", idxRate21, idxFee21);
-    setTier("Tier 2.2", idxRate22, idxFee22);
+    setTierFromCols(rateCols, false);
+    setTierFromCols(feeCols, true);
   });
 
   const tierOrder = ["Tier 1", "Tier 1.12", "Tier 2", "Tier 2.1", "Tier 2.2"];
@@ -143,14 +199,12 @@ function buildTablesHtmlFromCsv(records) {
       return a.localeCompare(b);
     });
 
-    // Header: Tiers | 36M | 60M | ... | Down Payment | Front-End Cap | Dealer Fee
     const headerCells = ["Tiers", ...termsSorted, "Down Payment", "Front-End Cap", "Dealer Fee"];
-
     const rows = [];
 
     tierOrder.forEach((tierName) => {
       const tierRates = group.tierRates[tierName];
-      if (!tierRates) return; // no data for this tier
+      if (!tierRates) return;
 
       const rowCells = [tierName];
 
@@ -158,9 +212,9 @@ function buildTablesHtmlFromCsv(records) {
         rowCells.push(tierRates[termLabel] || "");
       });
 
-      // Assumptions – adjust if your data encodes these somewhere else:
-      rowCells.push("0%"); // Down Payment
-      rowCells.push("130%"); // Front-End Cap
+      // For now, assume these constants (can be adjusted later)
+      rowCells.push("0%");       // Down Payment
+      rowCells.push("130%");     // Front-End Cap
       rowCells.push(group.tierFees[tierName] || "");
 
       rows.push(rowCells);
@@ -256,7 +310,7 @@ function buildTableBlock(headerCells, rows, eligibleText) {
   return tableHtml;
 }
 
-// Replace TABLES_START / TABLES_END section in template.html and write promo_output_polaris.html
+// Replace section between <!-- TABLES_START --> and <!-- TABLES_END --> in template.html
 function applyTablesToTemplate(tablesHtml) {
   const templatePath = path.join(__dirname, "template.html");
   const template = fs.readFileSync(templatePath, "utf8");
@@ -278,10 +332,11 @@ function applyTablesToTemplate(tablesHtml) {
 
   const result = `${before}\n${tablesHtml}\n${after}`;
 
+  // Write into /public so it’s web-accessible
   const outPath = path.join(__dirname, "public", "promo_output_polaris.html");
-fs.writeFileSync(outPath, result, "utf8");
+  fs.writeFileSync(outPath, result, "utf8");
 
-return outPath;
+  return outPath;
 }
 
 // CSV upload endpoint
@@ -296,7 +351,7 @@ app.post("/upload-csv", upload.single("ratesCsv"), (req, res) => {
   parse(
     csvText,
     {
-      columns: false, // first row is header
+      columns: false,
       skip_empty_lines: true,
     },
     (err, records) => {
@@ -312,10 +367,9 @@ app.post("/upload-csv", upload.single("ratesCsv"), (req, res) => {
         const outputPath = applyTablesToTemplate(tablesHtml);
         console.log("Updated HTML written to:", outputPath);
 
-       res.send(
-  "CSV uploaded and HTML updated successfully.\n" +
-    "You can view the updated HTML at: /promo_output_polaris.html"
-);
+        res.send(
+          "CSV uploaded and HTML updated successfully.\nYou can view the updated HTML at: /promo_output_polaris.html"
+        );
       } catch (e) {
         console.error("Error updating HTML:", e);
         res.status(500).send("Error updating HTML template: " + e.message);
@@ -324,8 +378,9 @@ app.post("/upload-csv", upload.single("ratesCsv"), (req, res) => {
   );
 });
 
-// Start server (Render will run `npm start`, which runs this)
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log("Upload page: /admin.html");
 });
+
