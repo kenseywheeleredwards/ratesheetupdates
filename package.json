@@ -1,0 +1,19 @@
+{
+  "name": "promo-html-tool",
+  "version": "1.0.0",
+  "description": "Generate promo HTML from uploaded CSV",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "csv-parse": "^5.5.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}
