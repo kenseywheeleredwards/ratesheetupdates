@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upload CSV – Rate Sheet Generator</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+  <div class="bg-white shadow-xl rounded-xl p-8 w-full max-w-xl">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">
+      Upload CSV to Update Rate Sheet
+    </h1>
+
+    <form id="uploadForm" enctype="multipart/form-data">
+      <label class="block mb-4">
+        <span class="text-gray-700 font-medium">Select CSV File</span>
+        <input
+          type="file"
+          name="ratesCsv"
+          accept=".csv"
+          required
+          class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
+        />
+      </label>
+
+      <button
+        type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-md font-semibold text-lg"
+      >
+        Upload & Generate HTML
+      </button>
+    </form>
+
+    <div id="result" class="mt-6 text-center text-gray-700 text-sm"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("uploadForm");
+    const resultBox = document.getElementById("result");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      resultBox.innerHTML = "Uploading… please wait.";
+
+      const formData = new FormData(form);
+
+      try {
+        const res = await fetch("/upload-csv", {
+          method: "POST",
+          body: formData,
+        });
+
+        const text = await res.text();
+
+        if (res.ok) {
+          resultBox.innerHTML = `
+            <p class="text-green-600 font-semibold mb-2">Success!</p>
+            <p>${text}</p>
+            <p class="mt-4">
+              <a class="text-blue-600 underline font-semibold" href="/promo_output_polaris.html" target="_blank">
+                View Updated Rate Sheet
+              </a>
+            </p>
+          `;
+        } else {
+          resultBox.innerHTML = `
+            <p class="text-red-600 font-semibold mb-2">Error:</p>
+            <p>${text}</p>
+          `;
+        }
+      } catch (err) {
+        resultBox.innerHTML = `
+          <p class="text-red-600 font-semibold">Upload failed.</p>
+          <p>${err.message}</p>
+        `;
+      }
+    });
+  </script>
+</body>
+</html>
