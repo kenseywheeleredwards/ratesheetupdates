@@ -34,68 +34,151 @@ function escapeHtml(str) {
  * CSV header must be:
  * Table Group, Eligible Products/Models, Tiers, 36M, 48M, 60M, 72M, 84M, Down Payment, Front-End Cap, Dealer Fee
  */
+// Build tables from OEM-style promo CSV (like "BRP Promotions - November 2025")
 function buildTablesHtmlFromCsv(records) {
   if (!records || records.length < 2) {
     return '<p class="text-red-600">No data found in CSV.</p>';
   }
 
-  const headerRow = records[0];
+  // Normalize header row (trim & string)
+  const headerRow = records[0].map((h) => (h || "").toString().trim());
   const dataRows = records.slice(1);
 
-  const groupIdx = headerRow.indexOf("Table Group");
-  const eligibleIdx = headerRow.indexOf("Eligible Products/Models");
-  const tiersIdx = headerRow.indexOf("Tiers");
+  // Column indexes we care about
+  const idxProduct = headerRow.indexOf("Product");
+  const idxYears = headerRow.indexOf("Eligible Model Years");
+  const idxTerm = headerRow.indexOf("Repayment Term");
 
-  if (groupIdx === -1 || eligibleIdx === -1 || tiersIdx === -1) {
+  const idxRate1 = headerRow.indexOf("Promo Rate RT 1");
+  const idxRate112 = headerRow.indexOf("Promo Rate RT 1.12");
+  const idxRate2 = headerRow.indexOf("Promo Rate RT 2");
+  const idxRate21 = headerRow.indexOf("Promo Rate RT 2.1");
+  const idxRate22 = headerRow.indexOf("Promo Rate RT 2.2");
+
+  const idxFee1 = headerRow.indexOf("Dealer Fee RT 1");
+  const idxFee112 = headerRow.indexOf("Dealer Fee RT 1.12");
+  const idxFee2 = headerRow.indexOf("Dealer Fee RT 2");
+  const idxFee21 = headerRow.indexOf("Dealer Fee RT 2.1");
+  const idxFee22 = headerRow.indexOf("Dealer Fee RT 2.2");
+
+  // Basic sanity check
+  if (idxProduct === -1 || idxYears === -1 || idxTerm === -1 || idxRate1 === -1 || idxRate2 === -1) {
     throw new Error(
-      'CSV must have "Table Group", "Eligible Products/Models", and "Tiers" columns in the header row.'
+      'CSV format not recognized. Expected columns like "Product", "Eligible Model Years", "Repayment Term", "Promo Rate RT 1", "Promo Rate RT 2".'
     );
   }
 
-  // All other columns become value columns (36M, 48M, 60M, 72M, 84M, Down Payment, Front-End Cap, Dealer Fee)
-  const valueColIndexes = headerRow
-    .map((_, idx) => idx)
-    .filter(
-      (idx) => idx !== groupIdx && idx !== eligibleIdx && idx !== tiersIdx
-    );
-  const valueHeaders = valueColIndexes.map((idx) => headerRow[idx]);
+  // Helper to turn "36.0" -> "36M"
+  function termLabelFrom(value) {
+    const str = (value || "").toString().trim();
+    const num = parseFloat(str);
+    if (!isNaN(num)) {
+      return `${String(num).replace(/\.0+$/, "")}M`;
+    }
+    return str;
+  }
 
-  // Group rows by Table Group
+  // Group rows by Product + Years
   const groups = new Map();
 
   dataRows.forEach((row) => {
-    if (!row || row.every((cell) => !cell || String(cell).trim() === "")) {
+    const product = (row[idxProduct] || "").toString().trim();
+    const years = (row[idxYears] || "").toString().trim();
+    const termRaw = row[idxTerm];
+
+    if (!product && !years && (termRaw === null || termRaw === undefined || String(termRaw).trim() === "")) {
       return; // skip empty rows
     }
 
-    const groupKey = row[groupIdx] || "Group 1";
-    const eligibleText = row[eligibleIdx] || "";
+    const termLabel = termLabelFrom(termRaw);
+    const key = `${product}|||${years}`;
 
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, {
-        eligibleText,
-        rows: [],
+    if (!groups.has(key)) {
+      groups.set(key, {
+        product,
+        years,
+        terms: new Set(),
+        tierRates: {}, // tierName -> { termLabel -> rate }
+        tierFees: {}, // tierName -> dealer fee
       });
     }
 
-    const group = groups.get(groupKey);
+    const group = groups.get(key);
+    group.terms.add(termLabel);
 
-    // First cell is Tier, rest are the value columns in order
-    const rowCells = [
-      row[tiersIdx] || "",
-      ...valueColIndexes.map((idx) => row[idx] || ""),
-    ];
+    function setTier(tierName, rateIdx, feeIdx) {
+      if (rateIdx === -1) return;
+      const rate = (row[rateIdx] || "").toString().trim();
+      if (!rate) return;
 
-    group.rows.push(rowCells);
+      if (!group.tierRates[tierName]) {
+        group.tierRates[tierName] = {};
+      }
+      group.tierRates[tierName][termLabel] = rate;
+
+      if (feeIdx !== -1) {
+        const fee = (row[feeIdx] || "").toString().trim();
+        if (fee) {
+          group.tierFees[tierName] = fee;
+        }
+      }
+    }
+
+    setTier("Tier 1", idxRate1, idxFee1);
+    setTier("Tier 1.12", idxRate112, idxFee112);
+    setTier("Tier 2", idxRate2, idxFee2);
+    setTier("Tier 2.1", idxRate21, idxFee21);
+    setTier("Tier 2.2", idxRate22, idxFee22);
   });
 
+  const tierOrder = ["Tier 1", "Tier 1.12", "Tier 2", "Tier 2.1", "Tier 2.2"];
   let html = "";
 
   groups.forEach((group) => {
-    const headerCells = ["Tiers", ...valueHeaders];
-    html += buildTableBlock(headerCells, group.rows, group.eligibleText);
+    const termsSorted = Array.from(group.terms);
+    termsSorted.sort((a, b) => {
+      const na = parseFloat(a);
+      const nb = parseFloat(b);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return a.localeCompare(b);
+    });
+
+    // Header: Tiers | 36M | 60M | ... | Down Payment | Front-End Cap | Dealer Fee
+    const headerCells = ["Tiers", ...termsSorted, "Down Payment", "Front-End Cap", "Dealer Fee"];
+
+    const rows = [];
+
+    tierOrder.forEach((tierName) => {
+      const tierRates = group.tierRates[tierName];
+      if (!tierRates) return; // no data for this tier
+
+      const rowCells = [tierName];
+
+      termsSorted.forEach((termLabel) => {
+        rowCells.push(tierRates[termLabel] || "");
+      });
+
+      // Assumptions – adjust if your data encodes these somewhere else:
+      rowCells.push("0%"); // Down Payment
+      rowCells.push("130%"); // Front-End Cap
+      rowCells.push(group.tierFees[tierName] || "");
+
+      rows.push(rowCells);
+    });
+
+    if (rows.length === 0) return;
+
+    const eligibleText = group.years
+      ? `${group.product} (${group.years})`
+      : group.product;
+
+    html += buildTableBlock(headerCells, rows, eligibleText);
     html += "\n\n";
   });
+
+  if (!html) {
+    return '<p class="text-red-600">No promo rows found in CSV.</p>';
+  }
 
   return html;
 }
