@@ -311,7 +311,7 @@ function buildTableBlock(headerCells, rows, eligibleText) {
 }
 
 // Replace section between <!-- TABLES_START --> and <!-- TABLES_END --> in template.html
-function applyTablesToTemplate(tablesHtml) {
+function applyTablesToTemplate(tablesHtml, oemName) {
   const templatePath = path.join(__dirname, "template.html");
   const template = fs.readFileSync(templatePath, "utf8");
 
@@ -330,9 +330,17 @@ function applyTablesToTemplate(tablesHtml) {
   const before = template.slice(0, startIndex + startMarker.length);
   const after = template.slice(endIndex);
 
-  const result = `${before}\n${tablesHtml}\n${after}`;
+  let result = `${before}\n${tablesHtml}\n${after}`;
 
-  // Write into /public so it’s web-accessible
+  // Swap "Polaris Promotional Rates" with "<OEM> Promotional Rates"
+  const safeOem = escapeHtml(oemName || "");
+  if (safeOem) {
+    result = result.replace(
+      /Polaris Promotional Rates/g,
+      `${safeOem} Promotional Rates`
+    );
+  }
+
   const outPath = path.join(__dirname, "public", "promo_output_polaris.html");
   fs.writeFileSync(outPath, result, "utf8");
 
