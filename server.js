@@ -370,16 +370,16 @@ app.post("/upload-csv", upload.single("ratesCsv"), (req, res) => {
           .send("Error parsing CSV file. Please check the format.");
       }
 
-      try {
-        const tablesHtml = buildTablesHtmlFromCsv(records);
-const oemName = (req.body && req.body.oemName) || "";
-const outputPath = applyTablesToTemplate(tablesHtml, oemName);
-console.log("Updated HTML written to:", outputPath);
+     try {
+  const tablesHtml = buildTablesHtmlFromCsv(records);
+  const oemName = (req.body && req.body.oemName) || "";
+  const outputPath = applyTablesToTemplate(tablesHtml, oemName);
+  console.log("Updated HTML written to:", outputPath);
 
-res.send(
-  "CSV uploaded and HTML updated successfully.\nYou can view the updated HTML at: /promo_output_polaris.html"
-);
-      } catch (e) {
+  res.send(
+    "CSV uploaded and HTML updated successfully.\nYou can view the updated HTML at: /promo_output_polaris.html"
+  );
+} catch (e) {
         console.error("Error updating HTML:", e);
         res.status(500).send("Error updating HTML template: " + e.message);
       }
