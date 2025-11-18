@@ -372,12 +372,13 @@ app.post("/upload-csv", upload.single("ratesCsv"), (req, res) => {
 
       try {
         const tablesHtml = buildTablesHtmlFromCsv(records);
-        const outputPath = applyTablesToTemplate(tablesHtml);
-        console.log("Updated HTML written to:", outputPath);
+const oemName = (req.body && req.body.oemName) || "";
+const outputPath = applyTablesToTemplate(tablesHtml, oemName);
+console.log("Updated HTML written to:", outputPath);
 
-        res.send(
-          "CSV uploaded and HTML updated successfully.\nYou can view the updated HTML at: /promo_output_polaris.html"
-        );
+res.send(
+  "CSV uploaded and HTML updated successfully.\nYou can view the updated HTML at: /promo_output_polaris.html"
+);
       } catch (e) {
         console.error("Error updating HTML:", e);
         res.status(500).send("Error updating HTML template: " + e.message);
