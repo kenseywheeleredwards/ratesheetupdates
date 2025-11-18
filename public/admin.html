@@ -15,18 +15,30 @@
       Upload CSV to Update Rate Sheet
     </h1>
 
-    <form id="uploadForm" enctype="multipart/form-data">
-      <label class="block mb-4">
-        <span class="text-gray-700 font-medium">Select CSV File</span>
-        <input
-          type="file"
-          name="ratesCsv"
-          accept=".csv"
-          required
-          class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
-        />
-      </label>
+   <form id="uploadForm" enctype="multipart/form-data">
+  <label class="block mb-4">
+    <span class="text-gray-700 font-medium">OEM Name</span>
+    <input
+      type="text"
+      name="oemName"
+      placeholder="Polaris, BRP, CFMOTO..."
+      required
+      class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
+    />
+  </label>
 
+  <label class="block mb-4">
+    <span class="text-gray-700 font-medium">Select CSV File</span>
+    <input
+      type="file"
+      name="ratesCsv"
+      accept=".csv"
+      required
+      class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
+    />
+  </label>
+  ...
+</form>
       <button
         type="submit"
         class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-md font-semibold text-lg"
