@@ -3,154 +3,153 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Upload CSV – Rate Sheet Generator</title>
+  <title>Upload CSV to Update Rate Sheet</title>
 
-  <!-- Tailwind CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: "Roboto", sans-serif;
+      background: #F7F7F7;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      width: 700px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      text-align: center;
+      color: #231F20;
+      margin-bottom: 32px;
+      font-size: 32px;
+    }
+
+    label {
+      font-size: 18px;
+      color: #231F20;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"],
+    input[type="file"] {
+      width: 100%;
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      border: 1px solid #D8D8D8;
+      font-size: 16px;
+    }
+
+    button {
+      width: 100%;
+      background: #0066E0;
+      color: white;
+      padding: 16px;
+      font-size: 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    button:hover {
+      background: #0052b8;
+    }
+
+    #result {
+      margin-top: 30px;
+      padding: 20px;
+      background: #E4F0F7;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      display: none;
+    }
+
+    #copyBtn {
+      display: none;
+      margin-top: 10px;
+      background: #0096D7;
+    }
+
+    #copyBtn:hover {
+      background: #0079ac;
+    }
+
+    .error {
+      color: #C62828;
+      margin-top: 20px;
+      text-align: center;
+      font-weight: bold;
+    }
+  </style>
 </head>
 
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
-  <div class="bg-white shadow-xl rounded-xl p-8 w-full max-w-2xl">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">
-      Upload CSV to Update Rate Sheet
-    </h1>
+<body>
+  <div class="container">
+    <h1>Upload CSV to Update Rate Sheet</h1>
 
-    <form id="uploadForm" enctype="multipart/form-data">
-      <!-- OEM name -->
-      <label class="block mb-4">
-        <span class="text-gray-700 font-medium">OEM Name</span>
-        <input
-          type="text"
-          name="oem"
-          placeholder="Polaris, BRP, Indian..."
-          required
-          class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
-        />
-      </label>
+    <label>OEM Name</label>
+    <input id="oemInput" type="text" placeholder="e.g., Polaris, BRP, Segway" />
 
-      <!-- CSV file -->
-      <label class="block mb-4">
-        <span class="text-gray-700 font-medium">Select CSV File</span>
-        <input
-          type="file"
-          name="csvFile"
-          accept=".csv"
-          required
-          class="mt-2 block w-full border border-gray-300 p-2 rounded-md"
-        />
-      </label>
+    <label>Select CSV File</label>
+    <input id="csvFile" type="file" accept=".csv" />
 
-      <button
-        type="submit"
-        class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-md font-semibold text-lg"
-      >
-        Upload &amp; Generate HTML
-      </button>
-    </form>
+    <button onclick="upload()">Upload & Generate HTML</button>
 
-    <div id="result" class="mt-6 text-center text-gray-700 text-sm"></div>
+    <div id="error" class="error"></div>
 
-    <!-- Generated HTML + Copy section -->
-    <div id="htmlContainer" class="mt-6 hidden">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-lg font-semibold text-gray-800">Generated HTML</h2>
+    <button id="copyBtn" onclick="copyHTML()">Copy HTML</button>
 
-        <button
-          id="copyBtn"
-          class="px-3 py-1 text-sm rounded-md border border-gray-300 hover:bg-gray-100 font-medium"
-          type="button"
-        >
-          Copy HTML
-        </button>
-      </div>
-
-      <p class="text-xs text-gray-500 mb-2">
-        This is the full HTML for the latest rate sheet. Copy and paste it into your other experience.
-      </p>
-
-      <textarea
-        id="htmlOutput"
-        class="w-full h-72 border border-gray-300 rounded-md p-2 font-mono text-xs whitespace-pre"
-        spellcheck="false"
-      ></textarea>
-
-      <p id="copyMsg" class="text-xs text-green-600 mt-2 hidden">
-        HTML copied to clipboard.
-      </p>
-    </div>
+    <pre id="result"></pre>
   </div>
 
   <script>
-    const form = document.getElementById("uploadForm");
-    const resultBox = document.getElementById("result");
-    const htmlContainer = document.getElementById("htmlContainer");
-    const htmlOutput = document.getElementById("htmlOutput");
-    const copyBtn = document.getElementById("copyBtn");
-    const copyMsg = document.getElementById("copyMsg");
+    async function upload() {
+      const file = document.getElementById("csvFile").files[0];
+      const oem = document.getElementById("oemInput").value.trim();
 
-    // ---- Handle Upload & Generation ----
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      resultBox.innerHTML = "Uploading… please wait.";
-      htmlContainer.classList.add("hidden");
-      copyMsg.classList.add("hidden");
-      htmlOutput.value = "";
-
-      const formData = new FormData(form);
-
-      try {
-        const res = await fetch("/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await res.json();
-
-        if (data.success) {
-          resultBox.innerHTML = `
-            <p class="text-green-600 font-semibold mb-2">Success!</p>
-            <p>Your HTML has been generated.</p>
-          `;
-
-          htmlOutput.value = data.html;
-          htmlContainer.classList.remove("hidden");
-
-        } else {
-          resultBox.innerHTML = `
-            <p class="text-red-600 font-semibold mb-2">Error:</p>
-            <p>${data.error}</p>
-          `;
-        }
-      } catch (err) {
-        resultBox.innerHTML = `
-          <p class="text-red-600 font-semibold">Upload failed.</p>
-          <p>${err.message}</p>
-        `;
+      if (!file || !oem) {
+        document.getElementById("error").innerText = "Please enter an OEM name and upload a CSV file.";
+        return;
       }
-    });
 
-    // ---- Copy Button ----
-    copyBtn.addEventListener("click", () => {
-      const text = htmlOutput.value || "";
-      if (!text) return;
+      document.getElementById("error").innerText = "";
 
-      htmlOutput.focus();
-      htmlOutput.select();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("oem", oem);
 
-      try {
-        const ok = document.execCommand("copy");
-        if (ok) {
-          copyMsg.textContent = "HTML copied to clipboard.";
-          copyMsg.classList.remove("hidden");
-        } else {
-          copyMsg.textContent = "Copy failed. You can still copy manually.";
-          copyMsg.classList.remove("hidden");
-        }
-      } catch (err) {
-        copyMsg.textContent = "Copy failed. You can still copy manually.";
-        copyMsg.classList.remove("hidden");
+      const res = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const text = await res.text();
+
+      if (res.status !== 200) {
+        document.getElementById("error").innerText = text;
+        return;
       }
-    });
+
+      document.getElementById("result").innerText = text;
+      document.getElementById("result").style.display = "block";
+      document.getElementById("copyBtn").style.display = "block";
+    }
+
+    function copyHTML() {
+      const content = document.getElementById("result").innerText;
+      navigator.clipboard.writeText(content);
+      alert("HTML copied to clipboard!");
+    }
   </script>
 </body>
 </html>
