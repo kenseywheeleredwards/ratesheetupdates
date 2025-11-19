@@ -167,11 +167,8 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
 
   let html = '';
 
-  // Outer wrapper + heading – matches the template structure
+// Outer wrapper only (no per-table heading)
   html += '<div class="mb-20">';
-  html += `<h2 class="text-2xl font-bold mb-6 text-gray-800 border-b pb-2">${escapeHtml(
-    heading
-  )}</h2>`;
 
   // Table wrapper
   html += '<div class="overflow-x-auto">';
