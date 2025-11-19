@@ -3,7 +3,8 @@
 // Rate Sheet HTML Tool
 // - CSV upload -> generates HTML (for your admin tool)
 // - Google Sheets integration -> reads latest tab and generates promo-style HTML
-// - /rates/latest endpoint -> Instapage calls this to render live table
+// - Groups rows by Program Name so each program gets its own table
+// - /rates/latest endpoint -> Instapage calls this to render live tables
 // - /admin/refresh-rates -> cron/manual refresh of cached HTML
 // -----------------------------------------------------------------------------
 
@@ -102,33 +103,18 @@ function simpleTableHtml(rows) {
   return html;
 }
 
-// ---------------------- PROMO-STYLE HTML GENERATION -------------------------
+// ---------------------- PROMO BLOCK BUILDER ---------------------------------
 
-function generateRateSheetHtml(rows) {
-  if (!rows || rows.length === 0) {
-    return '<p>No data found.</p>';
-  }
-
-  const headerRow = rows[0];
-  const dataRows = rows.slice(1);
-
-  // Find key columns by header label
-  const tierIdx = findColumnIndex(headerRow, 'tier');
-  const rateIdx = findColumnIndex(headerRow, 'interest rate');
-  const termIdx = findColumnIndex(headerRow, 'repayment term');
-  const dpIdx = findColumnIndex(headerRow, 'down payment');
-  const capIdx = findColumnIndex(headerRow, 'front-end cap');
-  const feeIdx = findColumnIndex(headerRow, 'dealer fee');
-  const eligibilityIdx = findColumnIndex(headerRow, 'eligibility list');
-  const programNameIdx = findColumnIndex(headerRow, 'program name');
-
-  // If we can't find core columns, just dump a basic table
-  if (tierIdx === -1 || rateIdx === -1 || termIdx === -1) {
-    console.warn(
-      'Could not find tier/rate/term columns, falling back to simple table.'
-    );
-    return simpleTableHtml(rows);
-  }
+function buildPromoBlock(programName, headerRow, dataRows, indices) {
+  const {
+    tierIdx,
+    rateIdx,
+    termIdx,
+    dpIdx,
+    capIdx,
+    feeIdx,
+    eligibilityIdx,
+  } = indices;
 
   // Build pivot: tiers x terms
   const termSet = new Set();
@@ -163,6 +149,11 @@ function generateRateSheetHtml(rows) {
     if (feeIdx !== -1 && row[feeIdx] && !meta.fee) meta.fee = String(row[feeIdx]).trim();
   });
 
+  if (!tierMap.size || !termSet.size) {
+    // Nothing meaningful, bail out for this program
+    return '';
+  }
+
   const termLabels = Array.from(termSet);
   // Sort terms numerically when possible (36M, 60M, etc.)
   termLabels.sort((a, b) => {
@@ -176,16 +167,10 @@ function generateRateSheetHtml(rows) {
 
   const tierLabels = Array.from(tierMap.keys());
 
-  // Heading from Program Name if available
-  let heading = 'Promotional Rates';
-  if (programNameIdx !== -1 && dataRows[0] && dataRows[0][programNameIdx]) {
-    heading = String(dataRows[0][programNameIdx]).trim();
-  }
-
   let html = '';
 
   html += '<div class="promo-rate-block">';
-  html += `<h3 class="promo-heading">${escapeHtml(heading)}</h3>`;
+  html += `<h3 class="promo-heading">${escapeHtml(programName)}</h3>`;
   html += '<hr class="promo-divider" />';
 
   // Table wrapper
@@ -225,7 +210,7 @@ function generateRateSheetHtml(rows) {
   html += '</tbody></table>';
   html += '</div>'; // promo-table-wrapper
 
-  // Eligibility block
+  // Eligibility block (per program)
   if (eligibilityIdx !== -1) {
     const eligSet = new Set();
 
@@ -264,6 +249,86 @@ function generateRateSheetHtml(rows) {
   html += '</div>'; // promo-rate-block
 
   return html;
+}
+
+// ---------------------- MASTER HTML GENERATOR -------------------------------
+
+function generateRateSheetHtml(rows) {
+  if (!rows || rows.length === 0) {
+    return '<p>No data found.</p>';
+  }
+
+  const headerRow = rows[0];
+  const dataRows = rows.slice(1);
+
+  // Find key columns once
+  const tierIdx = findColumnIndex(headerRow, 'tier');
+  const rateIdx = findColumnIndex(headerRow, 'interest rate');
+  const termIdx = findColumnIndex(headerRow, 'repayment term');
+  const dpIdx = findColumnIndex(headerRow, 'down payment');
+  const capIdx = findColumnIndex(headerRow, 'front-end cap');
+  const feeIdx = findColumnIndex(headerRow, 'dealer fee');
+  const eligibilityIdx = findColumnIndex(headerRow, 'eligibility list');
+  const programNameIdx = findColumnIndex(headerRow, 'program name');
+
+  // If we can't find core columns, just dump a basic table
+  if (tierIdx === -1 || rateIdx === -1 || termIdx === -1) {
+    console.warn(
+      'Could not find tier/rate/term columns, falling back to simple table.'
+    );
+    return simpleTableHtml(rows);
+  }
+
+  const indices = {
+    tierIdx,
+    rateIdx,
+    termIdx,
+    dpIdx,
+    capIdx,
+    feeIdx,
+    eligibilityIdx,
+    programNameIdx,
+  };
+
+  let html = '';
+
+  // If we have Program Name, group by it.
+  if (programNameIdx !== -1) {
+    const groupMap = new Map(); // programName -> rows[]
+
+    dataRows.forEach((row) => {
+      if (!row) return;
+      const rawName = row[programNameIdx];
+      if (!rawName) return;
+      const key = String(rawName).trim();
+      if (!key) return;
+
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key).push(row);
+    });
+
+    if (groupMap.size === 0) {
+      // Fallback: just treat as one block
+      html += buildPromoBlock('Promotional Rates', headerRow, dataRows, indices);
+    } else {
+      for (const [programName, rowsForProgram] of groupMap.entries()) {
+        const blockHtml = buildPromoBlock(
+          programName,
+          headerRow,
+          rowsForProgram,
+          indices
+        );
+        if (blockHtml) {
+          html += blockHtml;
+        }
+      }
+    }
+  } else {
+    // No Program Name column -> single block
+    html += buildPromoBlock('Promotional Rates', headerRow, dataRows, indices);
+  }
+
+  return html || '<p>No promo data found.</p>';
 }
 
 // ---------------------- CSV UPLOAD ENDPOINT ---------------------------------
@@ -397,4 +462,3 @@ app.post('/admin/refresh-rates', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
