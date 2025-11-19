@@ -126,6 +126,8 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
     capIdx,
     feeIdx,
     eligibilityIdx,
+    productIdx,
+    modelYearsIdx,
   } = indices;
 
   // Build pivot: tiers x terms
@@ -259,46 +261,75 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
 
   html += '</tbody></table></div>'; // table + overflow-x-auto
 
-  // Eligibility section – left aligned
-  if (eligibilityIdx !== -1) {
-    const eligSet = new Set();
+  // ----------------- Eligibility section (left aligned) ----------------------
+  // Priority:
+  // 1) If an explicit "eligibility" column exists, use that text
+  // 2) Otherwise, build "Product (Model Years)" from productIdx + modelYearsIdx
 
-    dataRows.forEach((row) => {
-      if (!row || !row[eligibilityIdx]) return;
-      const text = String(row[eligibilityIdx]).trim();
-      if (text) eligSet.add(text);
+  const eligSet = new Set();
+
+  dataRows.forEach((row) => {
+    if (!row) return;
+
+    let text = '';
+
+    // 1) Explicit eligibility column
+    if (eligibilityIdx !== -1 && row[eligibilityIdx]) {
+      text = String(row[eligibilityIdx]).trim();
+    } else {
+      // 2) Build from product + years
+      const product =
+        productIdx !== -1 && row[productIdx]
+          ? String(row[productIdx]).trim()
+          : '';
+      const years =
+        modelYearsIdx !== -1 && row[modelYearsIdx]
+          ? String(row[modelYearsIdx]).trim()
+          : '';
+
+      if (product || years) {
+        if (product && years) {
+          text = `${product} (${years})`;
+        } else {
+          text = product || years;
+        }
+      }
+    }
+
+    if (text) {
+      eligSet.add(text);
+    }
+  });
+
+  const eligItems = Array.from(eligSet);
+
+  if (eligItems.length) {
+    html += '<div class="mt-3 text-left">';
+    html +=
+      '<h3 class="text-lg font-semibold mb-2 text-gray-700 text-left">Eligible Products/Models:</h3>';
+    html +=
+      '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4 text-left">';
+
+    eligItems.forEach((item) => {
+      const parts = String(item)
+        .split(/\r?\n/)
+        .map((p) => p.trim())
+        .filter((p) => p !== '');
+
+      if (parts.length > 1) {
+        parts.forEach((p) => {
+          html += `<li><span class="font-medium">${escapeHtml(
+            p
+          )}</span></li>`;
+        });
+      } else {
+        html += `<li><span class="font-medium">${escapeHtml(
+          item
+        )}</span></li>`;
+      }
     });
 
-    const eligItems = Array.from(eligSet);
-
-    if (eligItems.length) {
-      html += '<div class="mt-3 text-left">';
-      html +=
-        '<h3 class="text-lg font-semibold mb-2 text-gray-700 text-left">Eligible Products/Models:</h3>';
-      html +=
-        '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4 text-left">';
-
-      eligItems.forEach((item) => {
-        const parts = String(item)
-          .split(/\r?\n/)
-          .map((p) => p.trim())
-          .filter((p) => p !== '');
-
-        if (parts.length > 1) {
-          parts.forEach((p) => {
-            html += `<li><span class="font-medium">${escapeHtml(
-              p
-            )}</span></li>`;
-          });
-        } else {
-          html += `<li><span class="font-medium">${escapeHtml(
-            item
-          )}</span></li>`;
-        }
-      });
-
-      html += '</ul></div>';
-    }
+    html += '</ul></div>';
   }
 
   html += '</div>'; // mb-20 outer wrapper
@@ -324,20 +355,27 @@ function generateRateSheetHtml(rows) {
   const capIdx = findColumnIndex(headerRow, 'front-end cap');
   const feeIdx = findColumnIndex(headerRow, 'dealer fee');
 
-  // Eligibility column: support several possible header names
- const eligibilityIdx = findAnyColumnIndex(headerRow, [
-  'eligibility list',
-  'eligible products/models',
-  'eligible products',
-  'eligible models',
-  'eligible makes',
-  'makes & models',
-  'makes and models',
-  'eligibility',
-  'eligible',
-  'models',
-]);
-  
+  // 1) Optional "eligibility list" style column (old sheets)
+  const eligibilityIdx = findAnyColumnIndex(headerRow, [
+    'eligibility list',
+    'eligible products/models',
+    'eligible products',
+    'eligible models',
+    'eligible makes',
+    'makes & models',
+    'makes and models',
+    'eligibility',
+    'eligible',
+  ]);
+
+  // 2) Product + Eligible Model Years (new sheets)
+  const productIdx = findAnyColumnIndex(headerRow, ['product']);
+  const modelYearsIdx = findAnyColumnIndex(headerRow, [
+    'eligible model years',
+    'model years',
+    'model year',
+  ]);
+
   const programNameIdx = findColumnIndex(headerRow, 'program name');
   const programStubIdx = findColumnIndex(headerRow, 'program name stub');
 
@@ -357,6 +395,8 @@ function generateRateSheetHtml(rows) {
     capIdx,
     feeIdx,
     eligibilityIdx,
+    productIdx,
+    modelYearsIdx,
   };
 
   let html = '';
