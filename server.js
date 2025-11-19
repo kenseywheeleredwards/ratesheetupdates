@@ -325,13 +325,19 @@ function generateRateSheetHtml(rows) {
   const feeIdx = findColumnIndex(headerRow, 'dealer fee');
 
   // Eligibility column: support several possible header names
-  const eligibilityIdx = findAnyColumnIndex(headerRow, [
-    'eligibility list',
-    'eligible products/models',
-    'eligible products',
-    'eligible models',
-  ]);
-
+ const eligibilityIdx = findAnyColumnIndex(headerRow, [
+  'eligibility list',
+  'eligible products/models',
+  'eligible products',
+  'eligible models',
+  'eligible makes',
+  'makes & models',
+  'makes and models',
+  'eligibility',
+  'eligible',
+  'models',
+]);
+  
   const programNameIdx = findColumnIndex(headerRow, 'program name');
   const programStubIdx = findColumnIndex(headerRow, 'program name stub');
 
