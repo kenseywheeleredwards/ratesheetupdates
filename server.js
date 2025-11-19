@@ -53,6 +53,18 @@ function findColumnIndex(headerRow, keyword) {
   });
 }
 
+// Find first column whose header matches ANY of a list of keywords
+function findAnyColumnIndex(headerRow, keywords) {
+  if (!headerRow) return -1;
+  const lower = headerRow.map((c) => (c ? String(c).toLowerCase() : ''));
+  for (const keyword of keywords) {
+    const needle = keyword.toLowerCase();
+    const idx = lower.findIndex((cell) => cell.includes(needle));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
 // Turn "36 Months" -> "36M" etc.
 function formatTermLabel(raw) {
   if (!raw) return '';
@@ -167,7 +179,7 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
 
   let html = '';
 
-// Outer wrapper only (no per-table heading)
+  // Outer wrapper only (no per-table heading)
   html += '<div class="mb-20">';
 
   // Table wrapper
@@ -247,7 +259,7 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
 
   html += '</tbody></table></div>'; // table + overflow-x-auto
 
-  // Eligibility section – same pattern as template
+  // Eligibility section – left aligned
   if (eligibilityIdx !== -1) {
     const eligSet = new Set();
 
@@ -260,12 +272,12 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
     const eligItems = Array.from(eligSet);
 
     if (eligItems.length) {
-  html += '<div class="mt-3" style="text-align:left;">';
-  html +=
-    '<h3 class="text-lg font-semibold mb-2 text-gray-700" style="text-align:left;">Eligible Products/Models:</h3>';
-  html +=
-    '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4" style="text-align:left;">';
-      
+      html += '<div class="mt-3 text-left">';
+      html +=
+        '<h3 class="text-lg font-semibold mb-2 text-gray-700 text-left">Eligible Products/Models:</h3>';
+      html +=
+        '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4 text-left">';
+
       eligItems.forEach((item) => {
         const parts = String(item)
           .split(/\r?\n/)
@@ -311,7 +323,15 @@ function generateRateSheetHtml(rows) {
   const dpIdx = findColumnIndex(headerRow, 'down payment');
   const capIdx = findColumnIndex(headerRow, 'front-end cap');
   const feeIdx = findColumnIndex(headerRow, 'dealer fee');
-  const eligibilityIdx = findColumnIndex(headerRow, 'eligibility list');
+
+  // Eligibility column: support several possible header names
+  const eligibilityIdx = findAnyColumnIndex(headerRow, [
+    'eligibility list',
+    'eligible products/models',
+    'eligible products',
+    'eligible models',
+  ]);
+
   const programNameIdx = findColumnIndex(headerRow, 'program name');
   const programStubIdx = findColumnIndex(headerRow, 'program name stub');
 
