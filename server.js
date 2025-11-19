@@ -2,217 +2,297 @@ const express = require("express");
 const fileUpload = require("express-fileupload");
 const fs = require("fs");
 const path = require("path");
-const csvParser = require("csv-parser");
+const csv = require("csv-parser");
 
 const app = express();
 app.use(express.static("public"));
 app.use(fileUpload());
-app.use(express.json({ limit: "10mb" }));
 
-// ----------------------------
-// Utility: Clean cell contents
-// ----------------------------
-function clean(value) {
-  if (!value) return "";
-  return String(value).replace(/(\r\n|\n|\r)/gm, "").trim();
+/**
+ * ----------------------------------------
+ * HELPER: Clean a CSV row (trim, remove empties)
+ * ----------------------------------------
+ */
+function cleanRow(row) {
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [k.trim(), String(v).trim()])
+  );
 }
 
-// ----------------------------
-// Detect CSV Type
-// ----------------------------
-function detectCsvType(rows) {
-  const headerRow = rows[0].map(clean).join(" | ");
-  if (headerRow.includes("Table Group") && headerRow.includes("Eligible Products")) {
-    return "promo";
-  }
+/**
+ * ----------------------------------------
+ * DETECT FORMAT — Promo or Standard
+ * ----------------------------------------
+ */
+function detectFormat(rows) {
+  if (!rows || rows.length === 0) return "unknown";
 
-  const first10 = rows.slice(0, 10).map(r => r.join(" ")).join(" ");
-  if (first10.toUpperCase().includes("STANDARD PROGRAM")) {
-    return "standard";
+  // 1. PROMOTIONAL FORMAT — clear unique fields
+  const headerKeys = Object.keys(rows[0]).map(h => h.toLowerCase());
+
+  const promoHeaders = ["table group", "eligible products/models", "tiers"];
+  const promoMatch = promoHeaders.every(h =>
+    headerKeys.some(k => k.includes(h))
+  );
+
+  if (promoMatch) return "promo";
+
+  // 2. STANDARD FORMAT — detect table shape (NOT text!)
+  // Look for a header-like row with:
+  // - First cell containing "Tier"
+  // - ~7+ numeric-like columns (12M, 24M, 36M, etc.)
+  for (let i = 0; i < Math.min(rows.length, 40); i++) {
+    const values = Object.values(rows[i]).map(v => String(v).trim());
+    if (values.length < 5) continue;
+
+    const first = values[0].toLowerCase();
+
+    const numericCols = values.slice(1).filter(v =>
+      v.match(/^\d{2}m$/i)
+    );
+
+    if (first.includes("tier") && numericCols.length >= 3) {
+      return "standard";
+    }
   }
 
   return "unknown";
 }
 
-// ----------------------------
-// PARSE — PROMOTIONAL
-// ----------------------------
+/**
+ * ----------------------------------------
+ * PARSE PROMO
+ * ----------------------------------------
+ */
 function parsePromo(rows) {
-  const header = rows[0].map(clean);
-  const groupIndex = header.indexOf("Table Group");
-  const productIndex = header.indexOf("Eligible Products/Models");
-  const tiersIndex = header.indexOf("Tiers");
-
-  if (groupIndex === -1 || productIndex === -1 || tiersIndex === -1) {
-    throw new Error("CSV missing required promotional headers.");
-  }
-
   const grouped = {};
 
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i].map(clean);
-    if (!row[groupIndex]) continue;
+  rows.forEach(r => {
+    const row = cleanRow(r);
 
-    const group = row[groupIndex];
-    if (!grouped[group]) grouped[group] = { rows: [], productLine: "" };
+    if (!row["Table Group"] || !row["Eligible Products/Models"]) return;
 
-    grouped[group].rows.push(row);
-    if (!grouped[group].productLine) {
-      grouped[group].productLine = row[productIndex];
-    }
-  }
+    const group = row["Table Group"];
+    if (!grouped[group]) grouped[group] = [];
+    grouped[group].push(row);
+  });
 
   return grouped;
 }
 
-// ----------------------------
-// PARSE — STANDARD (Rows 3–23)
-// ----------------------------
+/**
+ * ----------------------------------------
+ * PARSE STANDARD
+ * ----------------------------------------
+ */
 function parseStandard(rows) {
-  // Extract only the first 23 rows as requested
-  const slice = rows.slice(0, 23);
+  // Find header row by structure, not text
+  let headerIndex = -1;
 
-  // Detect table start
-  let startIndex = slice.findIndex(r => r[0] && r[0].toUpperCase().includes("TIERS"));
-  if (startIndex === -1) {
-    throw new Error("Unable to detect Standard table header row.");
+  for (let i = 0; i < 30; i++) {
+    const vals = Object.values(rows[i]).map(v => String(v).trim());
+
+    const hasTier = vals[0]?.toLowerCase().includes("tier");
+    const numericCols = vals.slice(1).filter(v => v.match(/^\d{2}m$/i));
+
+    if (hasTier && numericCols.length >= 3) {
+      headerIndex = i;
+      break;
+    }
   }
 
-  const header = slice[startIndex].map(clean);
+  if (headerIndex === -1) throw new Error("Could not locate Standard header row.");
+
+  // Extract header names
+  const header = Object.values(rows[headerIndex]).map(v => v.trim());
+
+  // Now extract data rows until blank row
   const tables = [];
-  let currentTable = { title: "", headers: header, rows: [] };
+  let current = [];
 
-  // Identify table title rows (contain ":" and not a header)
-  for (let i = 0; i < slice.length; i++) {
-    const row = slice[i].map(clean);
-    const joined = row.join(" ");
+  for (let i = headerIndex + 1; i < rows.length; i++) {
+    const vals = Object.values(rows[i]).map(v => v.trim());
 
-    if (joined.includes("PARTNER")) {
-      if (currentTable.rows.length) tables.push(currentTable);
-      currentTable = { title: "Partner & Subvented", headers: header, rows: [] };
+    const isBlank = vals.every(v => !v);
+    if (isBlank) {
+      if (current.length > 0) {
+        tables.push(current);
+        current = [];
+      }
+      continue;
     }
 
-    if (joined.includes("NON-PARTNER")) {
-      if (currentTable.rows.length) tables.push(currentTable);
-      currentTable = { title: "Non-Partner Unsubvented", headers: header, rows: [] };
-    }
-
-    if (joined.includes("USED")) {
-      if (currentTable.rows.length) tables.push(currentTable);
-      currentTable = { title: "Used", headers: header, rows: [] };
-    }
-
-    // Actual data rows start AFTER header row and when first column starts with "Tier"
-    if (i > startIndex && row[0] && row[0].toUpperCase().includes("TIER")) {
-      currentTable.rows.push(row);
-    }
+    current.push(vals);
   }
 
-  // Push last table
-  if (currentTable.rows.length) tables.push(currentTable);
+  if (current.length > 0) tables.push(current);
 
-  return tables;
+  return { header, tables };
 }
 
-// ----------------------------
-// HTML GENERATION
-// ----------------------------
-function generateTableHTML(table) {
-  return `
-    <h3 class="section-title">${table.title}</h3>
-    <table>
-      <thead>
-        <tr>${table.headers.map(h => `<th>${clean(h)}</th>`).join("")}</tr>
-      </thead>
-      <tbody>
-        ${table.rows
-          .map(row => `<tr>${row.map(c => `<td>${clean(c)}</td>`).join("")}</tr>`)
-          .join("")}
-      </tbody>
-    </table>
-  `;
-}
+/**
+ * ----------------------------------------
+ * HTML GENERATION (uses same style for all)
+ * ----------------------------------------
+ */
+function generateHTML({ oemName, promoData, standardData, format }) {
+  // Updated colors per your palette
+  const primary = "#231F20";
+  const background = "#F7F7F7";
+  const overlay = "#70737C";
+  const highlight = "#0096D7";
+  const alt = "#E4F0F7";
 
-function generateStandardHTML(tables, oem) {
-  return `
-  <div class="rate-sheet">
+  let title = `${oemName} Rate Sheet`;
 
-    <h1 class="title">${oem} Powersports Rates</h1>
+  let bodyContent = "";
 
-    ${tables.map(t => generateTableHTML(t)).join("")}
-
-  </div>
-  `;
-}
-
-function generatePromoHTML(groups, oem) {
-  return `
-  <div class="rate-sheet">
-
-    <h1 class="title">${oem} Promotional Rates</h1>
-
-    ${Object.keys(groups)
-      .map(group => {
-        return `
-        <h3 class="section-title">${group}</h3>
-        <table>
+  /** ----------------------
+   * PROMOTIONAL HTML
+   * ---------------------- */
+  if (format === "promo") {
+    for (const group in promoData) {
+      bodyContent += `
+        <h2 style="color:${primary}; margin-top:40px;">${group}</h2>
+        <table style="width:100%; border-collapse:collapse; margin-bottom:30px;">
           <thead>
-            <tr>${groups[group].rows[0].map(h => `<th>${clean(h)}</th>`).join("")}</tr>
+            <tr style="background:${alt};">
+              <th style="padding:10px; border:1px solid ${overlay};">Eligible Products/Models</th>
+              <th style="padding:10px; border:1px solid ${overlay};">Tiers</th>
+            </tr>
           </thead>
           <tbody>
-            ${groups[group].rows
-              .map(r => `<tr>${r.map(c => `<td>${clean(c)}</td>`).join("")}</tr>`)
+      `;
+
+      promoData[group].forEach(row => {
+        bodyContent += `
+          <tr>
+            <td style="padding:8px; border:1px solid ${overlay};">${row["Eligible Products/Models"]}</td>
+            <td style="padding:8px; border:1px solid ${overlay};">${row["Tiers"]}</td>
+          </tr>
+        `;
+      });
+
+      bodyContent += `</tbody></table>`;
+    }
+  }
+
+  /** ----------------------
+   * STANDARD HTML
+   * ---------------------- */
+  if (format === "standard") {
+    const { header, tables } = standardData;
+
+    tables.forEach((table, idx) => {
+      bodyContent += `
+        <h2 style="color:${primary}; margin-top:40px;">${oemName} Standard Rates — Table ${
+          idx + 1
+        }</h2>
+        <table style="width:100%; border-collapse:collapse; margin-bottom:30px;">
+          <thead style="background:${alt};">
+            <tr>
+              ${header
+                .map(
+                  h =>
+                    `<th style="padding:10px; border:1px solid ${overlay};">${h}</th>`
+                )
+                .join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${table
+              .map(
+                row =>
+                  `<tr>${row
+                    .map(
+                      cell =>
+                        `<td style="padding:8px; border:1px solid ${overlay};">${cell}</td>`
+                    )
+                    .join("")}</tr>`
+              )
               .join("")}
           </tbody>
         </table>
+      `;
+    });
+  }
 
-        <div class="product-line">Eligible: ${groups[group].productLine}</div>
-        `;
-      })
-      .join("")}
+  /** ----------------------
+   * FULL TEMPLATE
+   * ---------------------- */
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>${title}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body style="font-family:Roboto, sans-serif; background:${background}; padding:40px;">
 
-  </div>
-  `;
+  <h1 style="color:${primary}; text-align:center; margin-bottom:40px;">
+    ${title}
+  </h1>
+
+  ${bodyContent}
+
+</body>
+</html>`;
 }
 
-// ----------------------------
-// Main Upload Route
-// ----------------------------
-app.post("/upload", async (req, res) => {
-  try {
-    const oem = req.body.oem.trim();
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).send("No CSV file uploaded.");
-    }
-
-    const fileData = req.files.csvFile.data.toString("utf8");
-
-    const rows = fileData
-      .split("\n")
-      .map(line => line.split(","))
-      .filter(r => r.length > 1);
-
-    const type = detectCsvType(rows);
-
-    let html = "";
-
-    if (type === "promo") {
-      const groups = parsePromo(rows);
-      html = generatePromoHTML(groups, oem);
-    } else if (type === "standard") {
-      const tables = parseStandard(rows);
-      html = generateStandardHTML(tables, oem);
-    } else {
-      throw new Error("CSV format not recognized (neither promotional nor standard).");
-    }
-
-    return res.json({ success: true, html });
-
-  } catch (err) {
-    res.json({ success: false, error: err.message });
+/**
+ * ----------------------------------------
+ * MAIN UPLOAD ENDPOINT
+ * ----------------------------------------
+ */
+app.post("/upload", (req, res) => {
+  if (!req.files || !req.files.csvFile) {
+    return res.status(400).json({ error: "No CSV uploaded." });
   }
+
+  const oemName = req.body.oemName?.trim() || "Unknown OEM";
+  const file = req.files.csvFile;
+  const tempPath = path.join(__dirname, "temp.csv");
+
+  file.mv(tempPath, err => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    const rows = [];
+
+    fs.createReadStream(tempPath)
+      .pipe(csv())
+      .on("data", row => rows.push(row))
+      .on("end", () => {
+        const format = detectFormat(rows);
+
+        if (format === "unknown") {
+          return res.json({
+            error:
+              "CSV format not recognized as Promotional or Standard. Please verify file structure."
+          });
+        }
+
+        let html = "";
+
+        if (format === "promo") {
+          const promoData = parsePromo(rows);
+          html = generateHTML({ oemName, promoData, format });
+        }
+
+        if (format === "standard") {
+          const standardData = parseStandard(rows);
+          html = generateHTML({ oemName, standardData, format });
+        }
+
+        fs.unlinkSync(tempPath);
+        return res.json({ success: true, html });
+      });
+  });
 });
 
+/**
+ * Start server
+ */
 app.listen(10000, () => {
   console.log("Server running on port 10000");
 });
