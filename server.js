@@ -3,7 +3,7 @@
 // Rate Sheet HTML Tool
 // - CSV upload -> generates HTML (for your admin tool)
 // - Google Sheets integration -> reads latest tab and generates promo-style HTML
-// - Groups rows by Program Name so each program gets its own table
+// - Groups rows by Program Name Stub so each program gets its own table
 // - /rates/latest endpoint -> Instapage calls this to render live tables
 // - /admin/refresh-rates -> cron/manual refresh of cached HTML
 // -----------------------------------------------------------------------------
@@ -105,7 +105,7 @@ function simpleTableHtml(rows) {
 
 // ---------------------- PROMO BLOCK BUILDER ---------------------------------
 
-function buildPromoBlock(programName, headerRow, dataRows, indices) {
+function buildPromoBlock(heading, headerRow, dataRows, indices) {
   const {
     tierIdx,
     rateIdx,
@@ -150,12 +150,10 @@ function buildPromoBlock(programName, headerRow, dataRows, indices) {
   });
 
   if (!tierMap.size || !termSet.size) {
-    // Nothing meaningful, bail out for this program
     return '';
   }
 
   const termLabels = Array.from(termSet);
-  // Sort terms numerically when possible (36M, 60M, etc.)
   termLabels.sort((a, b) => {
     const ma = String(a).match(/^(\d+)/);
     const mb = String(b).match(/^(\d+)/);
@@ -169,48 +167,90 @@ function buildPromoBlock(programName, headerRow, dataRows, indices) {
 
   let html = '';
 
-  html += '<div class="promo-rate-block">';
-  html += `<h3 class="promo-heading">${escapeHtml(programName)}</h3>`;
-  html += '<hr class="promo-divider" />';
+  // Outer wrapper + heading – matches the template structure
+  html += '<div class="mb-20">';
+  html += `<h2 class="text-2xl font-bold mb-6 text-gray-800 border-b pb-2">${escapeHtml(
+    heading
+  )}</h2>`;
 
   // Table wrapper
-  html += '<div class="promo-table-wrapper">';
-  html += '<table class="rate-sheet-table promo-layout">';
-  html += '<thead><tr>';
+  html += '<div class="overflow-x-auto">';
+  html +=
+    '<table class="min-w-full divide-y divide-x divide-gray-300 border border-gray-300">';
+  html += '<thead class="bg-gray-100"><tr>';
 
-  html += '<th class="promo-col-tier">Tiers</th>';
+  // First column: tiers
+  html +=
+    '<th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-left">Tiers</th>';
+
+  // Term columns
   termLabels.forEach((term) => {
-    html += `<th>${escapeHtml(term)}</th>`;
+    html += `<th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-center">${escapeHtml(
+      term
+    )}</th>`;
   });
-  if (dpIdx !== -1) html += '<th>Down Payment</th>';
-  if (capIdx !== -1) html += '<th>Front-End Cap</th>';
-  if (feeIdx !== -1) html += '<th>Dealer Fee</th>';
 
-  html += '</tr></thead><tbody>';
+  // Optional DP / Cap / Dealer columns
+  if (dpIdx !== -1) {
+    html +=
+      '<th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-right">Down Payment</th>';
+  }
+  if (capIdx !== -1) {
+    html +=
+      '<th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-right">Front-End Cap</th>';
+  }
+  if (feeIdx !== -1) {
+    html +=
+      '<th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-right">Dealer Fee</th>';
+  }
+
+  html += '</tr></thead>';
+
+  // Body – mirrors original promo template
+  html += '<tbody class="bg-white divide-y divide-x divide-gray-200">';
 
   tierLabels.forEach((tier) => {
     const rowMap = tierMap.get(tier);
     const meta = tierMeta.get(tier) || { dp: '', cap: '', fee: '' };
 
-    html += '<tr>';
-    html += `<td class="promo-tier-cell">${escapeHtml(tier)}</td>`;
+    html += '<tr class="hover:bg-gray-50">';
 
+    // Tier cell
+    html += `<td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${escapeHtml(
+      tier
+    )}</td>`;
+
+    // Rates for each term
     termLabels.forEach((term) => {
       const rate = rowMap[term] || '';
-      html += `<td>${escapeHtml(rate)}</td>`;
+      html += `<td class="px-4 py-3 whitespace-nowrap text-sm text-center font-mono text-gray-700">${escapeHtml(
+        rate
+      )}</td>`;
     });
 
-    if (dpIdx !== -1) html += `<td>${escapeHtml(meta.dp)}</td>`;
-    if (capIdx !== -1) html += `<td>${escapeHtml(meta.cap)}</td>`;
-    if (feeIdx !== -1) html += `<td>${escapeHtml(meta.fee)}</td>`;
+    // Meta columns
+    if (dpIdx !== -1) {
+      html += `<td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">${escapeHtml(
+        meta.dp
+      )}</td>`;
+    }
+    if (capIdx !== -1) {
+      html += `<td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">${escapeHtml(
+        meta.cap
+      )}</td>`;
+    }
+    if (feeIdx !== -1) {
+      html += `<td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">${escapeHtml(
+        meta.fee
+      )}</td>`;
+    }
 
     html += '</tr>';
   });
 
-  html += '</tbody></table>';
-  html += '</div>'; // promo-table-wrapper
+  html += '</tbody></table></div>'; // table + overflow-x-auto
 
-  // Eligibility block (per program)
+  // Eligibility section – same pattern as template
   if (eligibilityIdx !== -1) {
     const eligSet = new Set();
 
@@ -221,10 +261,13 @@ function buildPromoBlock(programName, headerRow, dataRows, indices) {
     });
 
     const eligItems = Array.from(eligSet);
+
     if (eligItems.length) {
-      html += '<div class="promo-eligibility">';
-      html += '<h4>Eligible Products/Models:</h4>';
-      html += '<ul>';
+      html += '<div class="mt-3">';
+      html +=
+        '<h3 class="text-lg font-semibold mb-2 text-gray-700">Eligible Products/Models:</h3>';
+      html +=
+        '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4">';
 
       eligItems.forEach((item) => {
         const parts = String(item)
@@ -234,19 +277,22 @@ function buildPromoBlock(programName, headerRow, dataRows, indices) {
 
         if (parts.length > 1) {
           parts.forEach((p) => {
-            html += `<li>${escapeHtml(p)}</li>`;
+            html += `<li><span class="font-medium">${escapeHtml(
+              p
+            )}</span></li>`;
           });
         } else {
-          html += `<li>${escapeHtml(item)}</li>`;
+          html += `<li><span class="font-medium">${escapeHtml(
+            item
+          )}</span></li>`;
         }
       });
 
-      html += '</ul>';
-      html += '</div>';
+      html += '</ul></div>';
     }
   }
 
-  html += '</div>'; // promo-rate-block
+  html += '</div>'; // mb-20 outer wrapper
 
   return html;
 }
@@ -270,6 +316,7 @@ function generateRateSheetHtml(rows) {
   const feeIdx = findColumnIndex(headerRow, 'dealer fee');
   const eligibilityIdx = findColumnIndex(headerRow, 'eligibility list');
   const programNameIdx = findColumnIndex(headerRow, 'program name');
+  const programStubIdx = findColumnIndex(headerRow, 'program name stub');
 
   // If we can't find core columns, just dump a basic table
   if (tierIdx === -1 || rateIdx === -1 || termIdx === -1) {
@@ -287,20 +334,24 @@ function generateRateSheetHtml(rows) {
     capIdx,
     feeIdx,
     eligibilityIdx,
-    programNameIdx,
   };
 
   let html = '';
 
-  // If we have Program Name, group by it.
-  if (programNameIdx !== -1) {
-    const groupMap = new Map(); // programName -> rows[]
+  // Decide grouping key: prefer Program Name Stub, then Program Name, else single block
+  if (programStubIdx !== -1 || programNameIdx !== -1) {
+    const groupMap = new Map(); // key -> rows[]
 
     dataRows.forEach((row) => {
       if (!row) return;
-      const rawName = row[programNameIdx];
-      if (!rawName) return;
-      const key = String(rawName).trim();
+
+      let key = '';
+      if (programStubIdx !== -1 && row[programStubIdx]) {
+        key = String(row[programStubIdx]).trim();
+      } else if (programNameIdx !== -1 && row[programNameIdx]) {
+        key = String(row[programNameIdx]).trim();
+      }
+
       if (!key) return;
 
       if (!groupMap.has(key)) groupMap.set(key, []);
@@ -308,12 +359,28 @@ function generateRateSheetHtml(rows) {
     });
 
     if (groupMap.size === 0) {
-      // Fallback: just treat as one block
-      html += buildPromoBlock('Promotional Rates', headerRow, dataRows, indices);
+      // Fallback: treat entire sheet as one block
+      const heading =
+        programNameIdx !== -1 && dataRows[0] && dataRows[0][programNameIdx]
+          ? String(dataRows[0][programNameIdx]).trim()
+          : 'Promotional Rates';
+
+      html += buildPromoBlock(heading, headerRow, dataRows, indices);
     } else {
-      for (const [programName, rowsForProgram] of groupMap.entries()) {
+      for (const [key, rowsForProgram] of groupMap.entries()) {
+        // Heading preference: Program Name (if any row has it), else the stub key
+        let heading = key;
+        if (programNameIdx !== -1) {
+          const withName = rowsForProgram.find(
+            (r) => r[programNameIdx] && String(r[programNameIdx]).trim() !== ''
+          );
+          if (withName) {
+            heading = String(withName[programNameIdx]).trim();
+          }
+        }
+
         const blockHtml = buildPromoBlock(
-          programName,
+          heading,
           headerRow,
           rowsForProgram,
           indices
@@ -324,7 +391,7 @@ function generateRateSheetHtml(rows) {
       }
     }
   } else {
-    // No Program Name column -> single block
+    // No program columns -> single block for whole sheet
     html += buildPromoBlock('Promotional Rates', headerRow, dataRows, indices);
   }
 
