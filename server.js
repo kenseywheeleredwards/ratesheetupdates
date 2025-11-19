@@ -260,12 +260,12 @@ function buildPromoBlock(heading, headerRow, dataRows, indices) {
     const eligItems = Array.from(eligSet);
 
     if (eligItems.length) {
-      html += '<div class="mt-3">';
-      html +=
-        '<h3 class="text-lg font-semibold mb-2 text-gray-700">Eligible Products/Models:</h3>';
-      html +=
-        '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4">';
-
+  html += '<div class="mt-3" style="text-align:left;">';
+  html +=
+    '<h3 class="text-lg font-semibold mb-2 text-gray-700" style="text-align:left;">Eligible Products/Models:</h3>';
+  html +=
+    '<ul class="list-disc list-inside space-y-1 text-sm text-gray-600 pl-4" style="text-align:left;">';
+      
       eligItems.forEach((item) => {
         const parts = String(item)
           .split(/\r?\n/)
